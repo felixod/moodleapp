@@ -80,6 +80,7 @@
     "customurlscheme": "moodlemobile",
     "siteurl": "https://lms.samgups.ru",
     "sitename": "Цифровой университет СамГУПС",
+    "onlyallowlistedsites": false,
     "multisitesdisplay": "",
     "skipssoconfirmation": false,
     "forcedefaultlanguage": false,
