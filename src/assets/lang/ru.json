@@ -2045,6 +2045,7 @@
     "core.tag.inalltagcoll": "Везде",
     "core.tag.itemstaggedwith": "Область «{{$a.tagarea}}» помечена тегом «{{$a.tag}}»",
     "core.tag.notagsfound": "Не найдено тегов, совпадающих с «{{$a}}»",
+    "noresultsfor": "Нет результатов для \"{{$a}}\"",
     "core.tag.searchtags": "Поиск тегов",
     "core.tag.showingfirsttags": "Показать {{$a}} наиболее популярных тегов",
     "core.tag.tag": "Тег",
