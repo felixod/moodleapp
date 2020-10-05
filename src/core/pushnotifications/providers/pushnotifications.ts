@@ -18,7 +18,7 @@ import { Badge } from '@ionic-native/badge';
 import { Push, PushObject, PushOptions } from '@ionic-native/push';
 import { Device } from '@ionic-native/device';
 import { TranslateService } from '@ngx-translate/core';
-import { CoreAppProvider, CoreAppSchema } from '@providers/app';
+import { CoreApp, CoreAppProvider, CoreAppSchema } from '@providers/app';
 import { CoreInitDelegate } from '@providers/init';
 import { CoreLoggerProvider } from '@providers/logger';
 import { CoreSitesProvider, CoreSiteSchema } from '@providers/sites';
@@ -178,13 +178,26 @@ export class CorePushNotificationsProvider {
         ],
     };
 
-    constructor(logger: CoreLoggerProvider, protected appProvider: CoreAppProvider, private initDelegate: CoreInitDelegate,
-            protected pushNotificationsDelegate: CorePushNotificationsDelegate, protected sitesProvider: CoreSitesProvider,
-            private badge: Badge, private localNotificationsProvider: CoreLocalNotificationsProvider,
-            private utils: CoreUtilsProvider, private textUtils: CoreTextUtilsProvider, private push: Push,
-            private configProvider: CoreConfigProvider, private device: Device, private zone: NgZone,
-            private translate: TranslateService, private platform: Platform, private sitesFactory: CoreSitesFactoryProvider,
-            private filterProvider: CoreFilterProvider, private filterDelegate: CoreFilterDelegate) {
+    constructor(
+            logger: CoreLoggerProvider,
+            private initDelegate: CoreInitDelegate,
+            protected pushNotificationsDelegate: CorePushNotificationsDelegate,
+            protected sitesProvider: CoreSitesProvider,
+            private badge: Badge,
+            private localNotificationsProvider: CoreLocalNotificationsProvider,
+            private utils: CoreUtilsProvider,
+            private textUtils: CoreTextUtilsProvider,
+            private push: Push,
+            private configProvider: CoreConfigProvider,
+            private device: Device,
+            private zone: NgZone,
+            private translate: TranslateService,
+            platform: Platform,
+            appProvider: CoreAppProvider,
+            private sitesFactory: CoreSitesFactoryProvider,
+            private filterProvider: CoreFilterProvider,
+            private filterDelegate: CoreFilterDelegate
+            ) {
         this.logger = logger.getInstance('CorePushNotificationsProvider');
         this.appDB = appProvider.getDB();
         this.dbReady = appProvider.createTablesFromSchema(this.appTablesSchema).catch(() => {
@@ -209,7 +222,7 @@ export class CorePushNotificationsProvider {
      * @return Whether the device can be registered in Moodle.
      */
     canRegisterOnMoodle(): boolean {
-        return this.pushID && this.appProvider.isMobile();
+        return this.pushID && CoreApp.instance.isMobile();
     }
 
     /**
@@ -234,7 +247,7 @@ export class CorePushNotificationsProvider {
      * @return Promise resolved when done.
      */
     protected createDefaultChannel(): Promise<any> {
-        if (!this.platform.is('android')) {
+        if (!CoreApp.instance.isAndroid()) {
             return Promise.resolve();
         }
 
@@ -467,11 +480,11 @@ export class CorePushNotificationsProvider {
                             instanceId: 0,
                             filter: true
                         },
-                        isAndroid = this.platform.is('android'),
+                        isAndroid = CoreApp.instance.isAndroid(),
                         extraFeatures = this.utils.isTrueOrOne(data.extrafeatures);
 
                     // Get the filters to apply to text and message. Don't use FIlterHelper to prevent circular dependencies.
-                    this.filterProvider.canGetAvailableInContext(site.getId()).then((canGet) => {
+                    this.filterProvider.canGetFilters(site.getId()).then((canGet) => {
                         if (!canGet) {
                             // We cannot check which filters are available, apply them all.
                             return this.filterDelegate.getEnabledFilters(options.contextLevel, options.instanceId);
@@ -514,6 +527,12 @@ export class CorePushNotificationsProvider {
                             localNotif.icon = notification.image;
                             // This feature isn't supported by the official plugin, we use a fork.
                             (<any> localNotif).iconType = data['image-type'];
+
+                            localNotif.summary = data.summaryText;
+
+                            if (data.picture) {
+                                localNotif.attachments = [data.picture];
+                            }
                         }
 
                         Promise.all(promises).then(() => {
@@ -544,7 +563,7 @@ export class CorePushNotificationsProvider {
      * @return Promise resolved when device is unregistered.
      */
     async unregisterDeviceOnMoodle(site: CoreSite): Promise<any> {
-        if (!site || !this.appProvider.isMobile()) {
+        if (!site || !CoreApp.instance.isMobile()) {
             return Promise.reject(null);
         }
 
@@ -632,7 +651,7 @@ export class CorePushNotificationsProvider {
                     return previous + parseInt(counter, 10);
                 }, 0);
 
-                if (!this.appProvider.isDesktop() && !this.appProvider.isMobile()) {
+                if (!CoreApp.instance.isDesktop() && !CoreApp.instance.isMobile()) {
                     // Browser doesn't have an app badge, stop.
                     return total;
                 }

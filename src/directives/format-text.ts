@@ -17,7 +17,6 @@ import {
 } from '@angular/core';
 import { Platform, NavController, Content } from 'ionic-angular';
 import { TranslateService } from '@ngx-translate/core';
-import { CoreAppProvider } from '@providers/app';
 import { CoreEventsProvider } from '@providers/events';
 import { CoreFilepoolProvider } from '@providers/filepool';
 import { CoreLoggerProvider } from '@providers/logger';
@@ -84,7 +83,6 @@ export class CoreFormatTextDirective implements OnChanges {
             protected urlUtils: CoreUrlUtilsProvider,
             protected loggerProvider: CoreLoggerProvider,
             protected filepoolProvider: CoreFilepoolProvider,
-            protected appProvider: CoreAppProvider,
             protected contentLinksHelper: CoreContentLinksHelperProvider,
             @Optional() protected navCtrl: NavController,
             @Optional() protected content: Content, @Optional()
@@ -121,16 +119,16 @@ export class CoreFormatTextDirective implements OnChanges {
      * @param element Element to add the attributes to.
      * @return External content instance.
      */
-    protected addExternalContent(element: HTMLElement): CoreExternalContentDirective {
+    protected addExternalContent(element: Element): CoreExternalContentDirective {
         // Angular 2 doesn't let adding directives dynamically. Create the CoreExternalContentDirective manually.
-        const extContent = new CoreExternalContentDirective(<any> element, this.loggerProvider, this.filepoolProvider,
-            this.platform, this.sitesProvider, this.domUtils, this.urlUtils, this.appProvider, this.utils);
+        const extContent = new CoreExternalContentDirective(new ElementRef(element), this.loggerProvider, this.filepoolProvider,
+            this.platform, this.sitesProvider, this.domUtils, this.urlUtils, this.utils);
 
         extContent.component = this.component;
         extContent.componentId = this.componentId;
         extContent.siteId = this.siteId;
         extContent.src = element.getAttribute('src');
-        extContent.href = element.getAttribute('href');
+        extContent.href = element.getAttribute('href') || element.getAttribute('xlink:href');
         extContent.targetSrc = element.getAttribute('target-src');
         extContent.poster = element.getAttribute('poster');
 
@@ -213,7 +211,7 @@ export class CoreFormatTextDirective implements OnChanges {
             }
 
             const imgSrc = this.textUtils.escapeHTML(img.getAttribute('data-original-src') || img.getAttribute('src')),
-            label = this.textUtils.escapeHTML(this.translate.instant('core.openfullimage')),
+            label = this.translate.instant('core.openfullimage'),
             anchor = document.createElement('a');
 
             anchor.classList.add('core-image-viewer-icon');
@@ -354,7 +352,8 @@ export class CoreFormatTextDirective implements OnChanges {
             this.element.classList.add('core-disable-media-adapt');
 
             this.element.innerHTML = ''; // Remove current contents.
-            if (this.maxHeight && result.div.innerHTML != '') {
+            if (this.maxHeight && result.div.innerHTML != '' &&
+                    (this.fullOnClick || (window.innerWidth < 576 || window.innerHeight < 576))) { // Don't collapse in big screens.
 
                 // Move the children to the current element to be able to calculate the height.
                 this.domUtils.moveChildren(result.div, this.element);
@@ -446,35 +445,32 @@ export class CoreFormatTextDirective implements OnChanges {
             }
 
         }).then((formatted) => {
+            formatted = this.treatWindowOpen(formatted);
+
             const div = document.createElement('div'),
                 canTreatVimeo = site && site.isVersionGreaterEqualThan(['3.3.4', '3.4']),
                 navCtrl = this.svComponent ? this.svComponent.getMasterNav() : this.navCtrl;
-            let images,
-                anchors,
-                audios,
-                videos,
-                iframes,
-                buttons,
-                elementsWithInlineStyles,
-                stopClicksElements,
-                frames;
 
             div.innerHTML = formatted;
-            images = Array.from(div.querySelectorAll('img'));
-            anchors = Array.from(div.querySelectorAll('a'));
-            audios = Array.from(div.querySelectorAll('audio'));
-            videos = Array.from(div.querySelectorAll('video'));
-            iframes = Array.from(div.querySelectorAll('iframe'));
-            buttons = Array.from(div.querySelectorAll('.button'));
-            elementsWithInlineStyles = Array.from(div.querySelectorAll('*[style]'));
-            stopClicksElements = Array.from(div.querySelectorAll('button,input,select,textarea'));
-            frames = Array.from(div.querySelectorAll(CoreIframeUtilsProvider.FRAME_TAGS.join(',').replace(/iframe,?/, '')));
+
+            const images = Array.from(div.querySelectorAll('img'));
+            const anchors = Array.from(div.querySelectorAll('a'));
+            const audios = Array.from(div.querySelectorAll('audio'));
+            const videos = Array.from(div.querySelectorAll('video'));
+            const iframes = Array.from(div.querySelectorAll('iframe'));
+            const buttons = Array.from(div.querySelectorAll('.button'));
+            const elementsWithInlineStyles = Array.from(div.querySelectorAll('*[style]'));
+            const stopClicksElements = Array.from(div.querySelectorAll('button,input,select,textarea'));
+            const frames = Array.from(div.querySelectorAll(CoreIframeUtilsProvider.FRAME_TAGS.join(',').replace(/iframe,?/, '')));
+            const svgImages = Array.from(div.querySelectorAll('image'));
 
             // Walk through the content to find the links and add our directive to it.
             // Important: We need to look for links first because in 'img' we add new links without core-link.
             anchors.forEach((anchor) => {
                 // Angular 2 doesn't let adding directives dynamically. Create the CoreLinkDirective manually.
-                const linkDir = new CoreLinkDirective(anchor, this.domUtils, this.utils, this.sitesProvider, this.urlUtils,
+                const elementRef = new ElementRef(anchor);
+
+                const linkDir = new CoreLinkDirective(elementRef, this.domUtils, this.utils, this.sitesProvider, this.urlUtils,
                     this.contentLinksHelper, this.navCtrl, this.content, this.svComponent, this.textUtils, this.urlSchemesProvider);
                 linkDir.capture = true;
                 linkDir.ngOnInit();
@@ -509,6 +505,10 @@ export class CoreFormatTextDirective implements OnChanges {
 
             iframes.forEach((iframe) => {
                 this.treatIframe(iframe, site, canTreatVimeo, navCtrl);
+            });
+
+            svgImages.forEach((image) => {
+                this.addExternalContent(image);
             });
 
             // Handle buttons with inner links.
@@ -738,5 +738,27 @@ export class CoreFormatTextDirective implements OnChanges {
         }
 
         this.iframeUtils.treatFrame(iframe, false, navCtrl);
+    }
+
+    /**
+     * Convert window.open to window.openWindowSafely inside HTML tags.
+     *
+     * @param text Text to treat.
+     * @return Treated text.
+     */
+    protected treatWindowOpen(text: string): string {
+        // Get HTML tags that include window.open. Script tags aren't executed so there's no need to treat them.
+        const matches = text.match(/<[^>]+window\.open\([^\)]*\)[^>]*>/g);
+
+        if (matches) {
+            matches.forEach((match) => {
+                // Replace all the window.open inside the tag.
+                const treated = match.replace(/window\.open\(/g, 'window.openWindowSafely(');
+
+                text = text.replace(match, treated);
+            });
+        }
+
+        return text;
     }
 }

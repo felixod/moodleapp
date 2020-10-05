@@ -16,8 +16,9 @@ import { Injectable, NgZone } from '@angular/core';
 import { Config, Platform, NavController } from 'ionic-angular';
 import { TranslateService } from '@ngx-translate/core';
 import { Network } from '@ionic-native/network';
-import { CoreAppProvider } from '../app';
+import { CoreApp, CoreAppProvider } from '../app';
 import { CoreFileProvider } from '../file';
+import { CoreFileHelper } from '../file-helper';
 import { CoreLoggerProvider } from '../logger';
 import { CoreSitesProvider } from '../sites';
 import { CoreDomUtilsProvider } from './dom';
@@ -27,6 +28,7 @@ import { CoreUtilsProvider } from './utils';
 import { CoreContentLinksHelperProvider } from '@core/contentlinks/providers/helper';
 import { makeSingleton } from '@singletons/core.singletons';
 import { CoreUrl } from '@singletons/url';
+import { CoreWindow } from '@singletons/window';
 import { WKUserScriptWindow, WKUserScriptInjectionTime } from 'cordova-plugin-wkuserscript';
 
 /*
@@ -38,16 +40,25 @@ export class CoreIframeUtilsProvider {
 
     protected logger;
 
-    constructor(logger: CoreLoggerProvider, private fileProvider: CoreFileProvider, private sitesProvider: CoreSitesProvider,
-            private urlUtils: CoreUrlUtilsProvider, private textUtils: CoreTextUtilsProvider, private utils: CoreUtilsProvider,
-            private domUtils: CoreDomUtilsProvider, private platform: Platform, private appProvider: CoreAppProvider,
-            private translate: TranslateService, private network: Network, private zone: NgZone, private config: Config,
-            private contentLinksHelper: CoreContentLinksHelperProvider) {
+    constructor(logger: CoreLoggerProvider,
+            private fileProvider: CoreFileProvider,
+            private sitesProvider: CoreSitesProvider,
+            private urlUtils: CoreUrlUtilsProvider,
+            private textUtils: CoreTextUtilsProvider,
+            private utils: CoreUtilsProvider,
+            private domUtils: CoreDomUtilsProvider,
+            platform: Platform,
+            appProvider: CoreAppProvider,
+            private translate: TranslateService,
+            private network: Network, private zone: NgZone,
+            private config: Config,
+            private contentLinksHelper: CoreContentLinksHelperProvider
+            ) {
         this.logger = logger.getInstance('CoreUtilsProvider');
 
         const win = <WKUserScriptWindow> window;
 
-        if (platform.is('ios') && win.WKUserScript) {
+        if (appProvider.isIOS() && win.WKUserScript) {
             platform.ready().then(() => {
                 // Inject code to the iframes because we cannot access the online ones.
                 const wwwPath = fileProvider.getWWWAbsolutePath();
@@ -77,7 +88,7 @@ export class CoreIframeUtilsProvider {
     checkOnlineFrameInOffline(element: any, isSubframe?: boolean): boolean {
         const src = element.src || element.data;
 
-        if (src && src != 'about:blank' && !this.urlUtils.isLocalFileUrl(src) && !this.appProvider.isOnline()) {
+        if (src && src != 'about:blank' && !this.urlUtils.isLocalFileUrl(src) && !CoreApp.instance.isOnline()) {
             if (element.classList.contains('core-iframe-offline-disabled')) {
                 // Iframe already hidden, stop.
                 return true;
@@ -380,6 +391,16 @@ export class CoreIframeUtilsProvider {
             }
         } else if (this.urlUtils.isLocalFileUrl(url)) {
             // It's a local file.
+            const filename = url.substr(url.lastIndexOf('/') + 1);
+
+            if (!CoreFileHelper.instance.isOpenableInApp({ filename })) {
+                try {
+                    await CoreFileHelper.instance.showConfirmOpenUnsupportedFile();
+                } catch (error) {
+                    return; // Cancelled, stop.
+                }
+            }
+
             try {
                 await this.utils.openFile(url);
             } catch (error) {
@@ -387,17 +408,9 @@ export class CoreIframeUtilsProvider {
             }
         } else {
             // It's an external link, check if it can be opened in the app.
-            const treated = await this.contentLinksHelper.handleLink(url, undefined, navCtrl, true, true);
-
-            if (!treated) {
-                // Not opened in the app, open with browser. Check if we need to auto-login
-                if (!this.sitesProvider.isLoggedIn()) {
-                    // Not logged in, cannot auto-login.
-                    this.utils.openInBrowser(url);
-                } else {
-                    await this.sitesProvider.getCurrentSite().openInBrowserWithAutoLoginIfSameSite(url);
-                }
-            }
+            await CoreWindow.open(url, name, {
+                navCtrl,
+            });
         }
     }
 
@@ -407,9 +420,10 @@ export class CoreIframeUtilsProvider {
      * @param link Data of the link clicked.
      * @param element Frame element.
      * @param event Click event.
+     * @return Promise resolved when done.
      */
-    protected linkClicked(link: {href: string, target?: string}, element?: HTMLFrameElement | HTMLObjectElement, event?: Event)
-            : void {
+    protected async linkClicked(link: {href: string, target?: string}, element?: HTMLFrameElement | HTMLObjectElement,
+            event?: Event): Promise<void> {
         if (event && event.defaultPrevented) {
             // Event already prevented by some other code.
             return;
@@ -443,15 +457,28 @@ export class CoreIframeUtilsProvider {
             if (!this.sitesProvider.isLoggedIn()) {
                 this.utils.openInBrowser(link.href);
             } else {
-                this.sitesProvider.getCurrentSite().openInBrowserWithAutoLoginIfSameSite(link.href);
+                await this.sitesProvider.getCurrentSite().openInBrowserWithAutoLoginIfSameSite(link.href);
             }
         } else if (link.target == '_parent' || link.target == '_top' || link.target == '_blank') {
             // Opening links with _parent, _top or _blank can break the app. We'll open it in InAppBrowser.
             event && event.preventDefault();
-            this.utils.openFile(link.href).catch((error) => {
+
+            const filename = link.href.substr(link.href.lastIndexOf('/') + 1);
+
+            if (!CoreFileHelper.instance.isOpenableInApp({ filename })) {
+                try {
+                    await CoreFileHelper.instance.showConfirmOpenUnsupportedFile();
+                } catch (error) {
+                    return; // Cancelled, stop.
+                }
+            }
+
+            try {
+                await this.utils.openFile(link.href);
+            } catch (error) {
                 this.domUtils.showErrorModal(error);
-            });
-        } else if (this.platform.is('ios') && (!link.target || link.target == '_self') && element) {
+            }
+        } else if (CoreApp.instance.isIOS() && (!link.target || link.target == '_self') && element) {
             // In cordova ios 4.1.0 links inside iframes stopped working. We'll manually treat them.
             event && event.preventDefault();
             if (element.tagName.toLowerCase() == 'object') {

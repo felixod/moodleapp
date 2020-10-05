@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { Injectable } from '@angular/core';
-import { Platform } from 'ionic-angular';
+import { ModalController } from 'ionic-angular';
 import { Camera, CameraOptions } from '@ionic-native/camera';
 import { MediaCapture, MediaFile, CaptureError, CaptureAudioOptions, CaptureVideoOptions } from '@ionic-native/media-capture';
 import { TranslateService } from '@ngx-translate/core';
@@ -27,6 +27,7 @@ import { CoreTimeUtilsProvider } from '@providers/utils/time';
 import { CoreUtilsProvider } from '@providers/utils/utils';
 import { CoreWSFileUploadOptions } from '@providers/ws';
 import { Subject } from 'rxjs';
+import { CoreApp } from '@providers/app';
 
 /**
  * File upload options.
@@ -53,11 +54,18 @@ export class CoreFileUploaderProvider {
     onAudioCapture: Subject<boolean> = new Subject<boolean>();
     onVideoCapture: Subject<boolean> = new Subject<boolean>();
 
-    constructor(logger: CoreLoggerProvider, private fileProvider: CoreFileProvider, private textUtils: CoreTextUtilsProvider,
-            private utils: CoreUtilsProvider, private sitesProvider: CoreSitesProvider, private timeUtils: CoreTimeUtilsProvider,
-            private mimeUtils: CoreMimetypeUtilsProvider, private filepoolProvider: CoreFilepoolProvider,
-            private platform: Platform, private translate: TranslateService, private mediaCapture: MediaCapture,
-            private camera: Camera) {
+    constructor(logger: CoreLoggerProvider,
+            protected fileProvider: CoreFileProvider,
+            protected textUtils: CoreTextUtilsProvider,
+            protected utils: CoreUtilsProvider,
+            protected sitesProvider: CoreSitesProvider,
+            protected timeUtils: CoreTimeUtilsProvider,
+            protected mimeUtils: CoreMimetypeUtilsProvider,
+            protected filepoolProvider: CoreFilepoolProvider,
+            protected translate: TranslateService,
+            protected mediaCapture: MediaCapture,
+            protected camera: Camera,
+            protected modalCtrl: ModalController) {
         this.logger = logger.getInstance('CoreFileUploaderProvider');
     }
 
@@ -111,6 +119,29 @@ export class CoreFileUploaderProvider {
     }
 
     /**
+     * Record an audio file without using an external app.
+     *
+     * @return Promise resolved with the file.
+     */
+    captureAudioInApp(): Promise<MediaFile> {
+        return new Promise((resolve, reject): any => {
+            const params = {
+                type: 'audio',
+            };
+
+            const modal = this.modalCtrl.create('CoreEmulatorCaptureMediaPage', params, { enableBackdropDismiss: false });
+            modal.present();
+            modal.onDidDismiss((data: any, role: string) => {
+                if (role == 'success') {
+                    resolve(data[0]);
+                } else {
+                    reject(data);
+                }
+            });
+        });
+    }
+
+    /**
      * Start the video recorder application and return information about captured video clip files.
      *
      * @param options Options.
@@ -152,7 +183,7 @@ export class CoreFileUploaderProvider {
     getCameraUploadOptions(uri: string, isFromAlbum?: boolean): CoreFileUploaderOptions {
         const extension = this.mimeUtils.guessExtensionFromUrl(uri);
         const mimetype = this.mimeUtils.getMimeType(extension);
-        const isIOS = this.platform.is('ios');
+        const isIOS = CoreApp.instance.isIOS();
         const options: CoreFileUploaderOptions = {
                 deleteAfterUpload: !isFromAlbum,
                 mimeType: mimetype
@@ -175,7 +206,7 @@ export class CoreFileUploaderProvider {
             // If the file was picked from the album, delete it only if it was copied to the app's folder.
             options.deleteAfterUpload = this.fileProvider.isFileInAppFolder(uri);
 
-            if (this.platform.is('android')) {
+            if (CoreApp.instance.isAndroid()) {
                 // Picking an image from album in Android adds a timestamp at the end of the file. Delete it.
                 options.fileName = options.fileName.replace(/(\.[^\.]*)\?[^\.]*$/, '$1');
             }
@@ -215,13 +246,14 @@ export class CoreFileUploaderProvider {
      */
     getMediaUploadOptions(mediaFile: MediaFile): CoreFileUploaderOptions {
         const options: CoreFileUploaderOptions = {};
-        let filename = mediaFile.name,
-            split;
+        let filename = mediaFile.name;
 
-        // Add a timestamp to the filename to make it unique.
-        split = filename.split('.');
-        split[0] += '_' + this.timeUtils.readableTimestamp();
-        filename = split.join('.');
+        if (!filename.match(/_\d{14}(\..*)?$/)) {
+            // Add a timestamp to the filename to make it unique.
+            const split = filename.split('.');
+            split[0] += '_' + this.timeUtils.readableTimestamp();
+            filename = split.join('.');
+        }
 
         options.fileName = filename;
         options.deleteAfterUpload = true;

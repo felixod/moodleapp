@@ -210,11 +210,23 @@ export interface CoreRegisteredSiteSchema extends CoreSiteSchema {
     siteId?: string;
 }
 
+/**
+ * Possible reading strategies (for cache).
+ */
 export const enum CoreSitesReadingStrategy {
     OnlyCache,
     PreferCache,
+    OnlyNetwork,
     PreferNetwork,
 }
+
+/**
+ * Common options used when calling a WS through CoreSite.
+ */
+export type CoreSitesCommonWSOptions = {
+    readingStrategy?: CoreSitesReadingStrategy; // Reading strategy.
+    siteId?: string; // Site ID. If not defined, current site.
+};
 
 /*
  * Service to manage and interact with sites.
@@ -360,7 +372,7 @@ export class CoreSitesProvider {
     // Site schema for this provider.
     protected siteSchema: CoreSiteSchema = {
         name: 'CoreSitesProvider',
-        version: 1,
+        version: 2,
         canBeCleared: [ CoreSite.WS_CACHE_TABLE ],
         tables: [
             {
@@ -382,6 +394,14 @@ export class CoreSitesProvider {
                     {
                         name: 'expirationTime',
                         type: 'INTEGER'
+                    },
+                    {
+                        name: 'component',
+                        type: 'TEXT'
+                    },
+                    {
+                        name: 'componentId',
+                        type: 'INTEGER'
                     }
                 ]
             },
@@ -399,7 +419,31 @@ export class CoreSitesProvider {
                     }
                 ]
             }
-        ]
+        ],
+        async migrate (db: SQLiteDB, oldVersion: number, siteId: string): Promise<any> {
+            if (oldVersion && oldVersion < 2) {
+                const newTable = CoreSite.WS_CACHE_TABLE;
+                const oldTable = 'wscache';
+
+                try {
+                    await db.tableExists(oldTable);
+                } catch (error) {
+                    // Old table does not exist, ignore.
+                    return;
+                }
+                // Cannot use insertRecordsFrom because there are extra fields, so manually code INSERT INTO.
+                await db.execute(
+                    'INSERT INTO ' + newTable + ' ' +
+                    'SELECT id, data, key, expirationTime, NULL as component, NULL as componentId ' +
+                    'FROM ' + oldTable);
+
+                try {
+                    await db.dropTable(oldTable);
+                } catch (error) {
+                    // Error deleting old table, ignore.
+                }
+            }
+        }
     };
 
     constructor(logger: CoreLoggerProvider,
@@ -989,6 +1033,15 @@ export class CoreSitesProvider {
         };
 
         return this.appDB.insertRecord(CoreSitesProvider.SITES_TABLE, entry);
+    }
+
+    /**
+     * Check the app for a site and show a download dialogs if necessary.
+     *
+     * @param response Data obtained during site check.
+     */
+    async checkApplication(response: CoreSiteCheckResponse): Promise<void> {
+        await this.checkRequiredMinimumVersion(response.config);
     }
 
     /**
@@ -1967,6 +2020,14 @@ export class CoreSitesProvider {
                     forceOffline: true,
                 };
             case CoreSitesReadingStrategy.PreferNetwork:
+                return {
+                    getFromCache: false,
+                };
+            case CoreSitesReadingStrategy.OnlyNetwork:
+                return {
+                    getFromCache: false,
+                    emergencyCache: false,
+                };
             default:
                 return {};
         }
