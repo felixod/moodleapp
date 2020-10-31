@@ -29,7 +29,8 @@ import { CoreContentLinksHelperProvider } from '@core/contentlinks/providers/hel
 import { makeSingleton } from '@singletons/core.singletons';
 import { CoreUrl } from '@singletons/url';
 import { CoreWindow } from '@singletons/window';
-import { WKUserScriptWindow, WKUserScriptInjectionTime } from 'cordova-plugin-wkuserscript';
+import { WKUserScriptWindow } from 'cordova-plugin-wkuserscript';
+import { WKWebViewCookiesWindow } from 'cordova-plugin-wkwebview-cookies';
 
 /*
  * "Utils" service with helper functions for iframes, embed and similar.
@@ -69,7 +70,7 @@ export class CoreIframeUtilsProvider {
                 win.WKUserScript.addScript({
                     id: 'CoreIframeUtilsRecaptchaScript',
                     file: recaptchaPath,
-                    injectionTime: WKUserScriptInjectionTime.END,
+                    injectionTime: win.WKUserScript.InjectionTime.END,
                 });
 
                 // Handle post messages received by iframes.
@@ -329,7 +330,7 @@ export class CoreIframeUtilsProvider {
 
             // Find the link being clicked.
             let el = <Element> event.target;
-            while (el && el.tagName !== 'A') {
+            while (el && el.tagName !== 'A' && el.tagName !== 'a') {
                 el = el.parentElement;
             }
 
@@ -486,6 +487,36 @@ export class CoreIframeUtilsProvider {
             } else {
                 element.setAttribute('src', link.href);
             }
+        }
+    }
+
+    /**
+     * Fix cookies for an iframe URL.
+     *
+     * @param url URL of the iframe.
+     * @return Promise resolved when done.
+     */
+    async fixIframeCookies(url: string): Promise<void> {
+        if (!CoreApp.instance.isIOS() || !url || this.urlUtils.isLocalFileUrl(url)) {
+            // No need to fix cookies.
+            return;
+        }
+
+        // Save a "fake" cookie for the iframe's domain to fix a bug in WKWebView.
+        try {
+            const win = <WKWebViewCookiesWindow> window;
+            const urlParts = CoreUrl.parse(url);
+
+            if (urlParts.domain) {
+                await win.WKWebViewCookies.setCookie({
+                    name: 'MoodleAppCookieForWKWebView',
+                    value: '1',
+                    domain: urlParts.domain,
+                });
+            }
+        } catch (err) {
+            // Ignore errors.
+            this.logger.error('Error setting cookie', err);
         }
     }
 }

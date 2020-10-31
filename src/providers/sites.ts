@@ -653,7 +653,8 @@ export class CoreSitesProvider {
      * @return A promise to be resolved if the site exists.
      */
     siteExists(siteUrl: string): Promise<void> {
-        return this.http.post(siteUrl + '/login/token.php', {}).timeout(this.wsProvider.getRequestTimeout()).toPromise()
+        return this.http.post(siteUrl + '/login/token.php', { appsitecheck: 1 }).
+                timeout(this.wsProvider.getRequestTimeout()).toPromise()
                 .catch(() => {
             // Default error messages are kinda bad, return our own message.
             return Promise.reject({error: this.translate.instant('core.cannotconnecttrouble')});
@@ -1549,10 +1550,15 @@ export class CoreSitesProvider {
         await this.dbReady;
 
         const site = await this.getSite(siteId);
-        const newValues = {
-            token: '', // Erase the token for security.
+        const newValues: any = {
             loggedOut: loggedOut ? 1 : 0
         };
+
+        if (loggedOut) {
+            // Erase the token for security.
+            newValues.token = '';
+            site.token = '';
+        }
 
         site.setLoggedOut(loggedOut);
 
