@@ -24,6 +24,7 @@ import { CoreQuestionHandler } from '@core/question/providers/delegate';
 import { CoreQuestionHelperProvider } from '@core/question/providers/helper';
 import { CoreQuestion } from '@core/question/providers/question';
 import { AddonQtypeEssayComponent } from '../component/essay';
+import { CoreWSExternalFile } from '@providers/ws';
 
 /**
  * Handler to support essay question type.
@@ -65,6 +66,23 @@ export class AddonQtypeEssayHandler implements CoreQuestionHandler {
      */
     deleteOfflineData(question: any, component: string, componentId: string | number, siteId?: string): Promise<void> {
         return this.questionHelper.deleteStoredQuestionFiles(question, component, componentId, siteId);
+    }
+
+    /**
+     * Get the list of files that needs to be downloaded in addition to the files embedded in the HTML.
+     *
+     * @param question Question.
+     * @param usageId Usage ID.
+     * @return List of files or URLs.
+     */
+    getAdditionalDownloadableFiles(question: any, usageId: number): (string | CoreWSExternalFile)[] {
+        if (!question.responsefileareas) {
+            return [];
+        }
+
+        return question.responsefileareas.reduce((urlsList, area) => {
+            return urlsList.concat(area.files || []);
+        }, []);
     }
 
     /**
@@ -130,7 +148,7 @@ export class AddonQtypeEssayHandler implements CoreQuestionHandler {
         }
 
         if (!uploadFilesSupported && this.questionHelper.hasDraftFileUrls(element.innerHTML)) {
-            return 'core.question.errorinlinefilesnotsupportedinsite';
+            return 'core.question.errorembeddedfilesnotsupportedinsite';
         }
     }
 
@@ -165,8 +183,8 @@ export class AddonQtypeEssayHandler implements CoreQuestionHandler {
             return attachments && attachments.length >= Number(question.settings.attachmentsrequired) ? 1 : 0;
         }
 
-        return (hasTextAnswer || question.settings.responserequired == '0') &&
-                (attachments && attachments.length > Number(question.settings.attachmentsrequired)) ? 1 : 0;
+        return ((hasTextAnswer || question.settings.responserequired == '0') &&
+                (attachments && attachments.length >= Number(question.settings.attachmentsrequired))) ? 1 : 0;
     }
 
     /**
@@ -364,7 +382,19 @@ export class AddonQtypeEssayHandler implements CoreQuestionHandler {
                     question.html, this.questionHelper.getResponseFileAreaFiles(question, 'answer'));
         }
 
-        // Add some HTML to the text if needed.
-        answers[textarea.name] = this.textUtils.formatHtmlLines(answers[textarea.name]);
+        let isPlainText = false;
+        if (question.isPlainText !== undefined) {
+            isPlainText = question.isPlainText;
+        } else if (question.settings) {
+            isPlainText = question.settings.responseformat == 'monospaced' || question.settings.responseformat == 'plain';
+        } else {
+            const questionEl = this.domUtils.convertToElement(question.html);
+            isPlainText = !!questionEl.querySelector('.qtype_essay_monospaced') || !!questionEl.querySelector('.qtype_essay_plain');
+        }
+
+        if (!isPlainText) {
+            // Add some HTML to the text if needed.
+            answers[textarea.name] = this.textUtils.formatHtmlLines(answers[textarea.name]);
+        }
     }
 }
