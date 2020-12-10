@@ -396,7 +396,7 @@ export class CoreLoginSitePage {
      * @return Promise resolved after logging in.
      */
     protected async login(response: CoreSiteCheckResponse, foundSite?: CoreLoginSiteInfoExtended): Promise<void> {
-        return this.sitesProvider.checkApplication(response).then(() => {
+        return this.sitesProvider.checkApplication(response.config).then(() => {
 
             this.domUtils.triggerFormSubmittedEvent(this.formElement, true);
 
@@ -526,7 +526,7 @@ export class CoreLoginSitePage {
             // Check if site uses SSO.
             const response = await this.sitesProvider.checkSite(siteUrl);
 
-            await this.sitesProvider.checkRequiredMinimumVersion(response.config);
+            await this.sitesProvider.checkApplication(response.config);
 
             if (!this.loginHelper.isSSOLoginNeeded(response.code)) {
                 // No SSO, go to credentials page.
